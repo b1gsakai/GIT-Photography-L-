@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photography Gallery</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .card img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+        }
+        .card-title {
+            padding: 15px;
+            text-align: center;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="gallery">
+        <div class="card">
+            <img src="https://via.placeholder.com/300x200?text=Photo+1" alt="Placeholder Image 1">
+            <div class="card-title">Photo 1</div>
+        </div>
+        <div class="card">
+            <img src="https://via.placeholder.com/300x200?text=Photo+2" alt="Placeholder Image 2">
+            <div class="card-title">Photo 2</div>
+        </div>
+        <div class="card">
+            <img src="https://via.placeholder.com/300x200?text=Photo+3" alt="Placeholder Image 3">
+            <div class="card-title">Photo 3</div>
+        </div>
+        <div class="card">
+            <img src="https://via.placeholder.com/300x200?text=Photo+4" alt="Placeholder Image 4">
+            <div class="card-title">Photo 4</div>
+        </div>
+        <div class="card">
+            <img src="https://via.placeholder.com/300x200?text=Photo+5" alt="Placeholder Image 5">
+            <div class="card-title">Photo 5</div>
+        </div>
+        <div class="card">
+            <img src="https://via.placeholder.com/300x200?text=Photo+6" alt="Placeholder Image 6">
+            <div class="card-title">Photo 6</div>
+        </div>
+        <div class="card">
+            <img src="https://via.placeholder.com/300x200?text=Photo+7" alt="Placeholder Image 7">
+            <div class="card-title">Photo 7</div>
+        </div>
+        <div class="card">
+            <img src="https://via.placeholder.com/300x200?text=Photo+8" alt="Placeholder Image 8">
+            <div class="card-title">Photo 8</div>
+        </div>
+        <div class="card">
+            <img src="https://via.placeholder.com/300x200?text=Photo+9" alt="Placeholder Image 9">
+            <div class="card-title">Photo 9</div>
+        </div>
+    </div>
+</body>
+</html>
