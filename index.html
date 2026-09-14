@@ -108,6 +108,7 @@
             display: flex;
             align-items: center;
             gap: 10px;
+            flex-wrap: wrap;
         }
         .star-rating {
             display: flex;
@@ -153,6 +154,10 @@
         }
         .submit-btn:hover {
             background: #45a049;
+        }
+        .submit-btn:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
         }
         .comments-list {
             margin-top: 10px;
@@ -207,15 +212,64 @@
             gap: 2px;
             font-size: 0.9rem;
         }
+        .error-message {
+            color: #d32f2f;
+            font-size: 0.85rem;
+            margin-top: 5px;
+        }
+        .success-message {
+            color: #388e3c;
+            font-size: 0.85rem;
+            margin-top: 5px;
+        }
+        .status-bar {
+            text-align: center;
+            padding: 10px;
+            background: #fff3cd;
+            color: #856404;
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            display: none;
+        }
+        .status-bar.show {
+            display: block;
+        }
     </style>
 </head>
 <body>
     <div class="page-title">Food Photography Gallery</div>
+    <div id="statusBar" class="status-bar"></div>
     
     <script>
+        // Check if backend is available
+        let backendAvailable = false;
+        const API_BASE = '';
+        
+        async function checkBackend() {
+            try {
+                const response = await fetch('/api/foods');
+                backendAvailable = response.ok;
+                if (!backendAvailable) {
+                    showStatus('Backend server not running. Features limited. Run the Flask server on Replit.', true);
+                }
+            } catch (e) {
+                backendAvailable = false;
+                showStatus('Backend server not running. Features limited. Run the Flask server on Replit.', true);
+            }
+        }
+        
+        function showStatus(message, isError) {
+            const statusBar = document.getElementById('statusBar');
+            statusBar.textContent = message;
+            statusBar.className = 'status-bar show';
+            statusBar.style.background = isError ? '#ffebee' : '#e8f5e9';
+            statusBar.style.color = isError ? '#c62828' : '#2e7d32';
+        }
+        
         // User session management
         let currentUser = {
-            id: localStorage.getItem('foodGalleryUserId') || crypto.randomUUID(),
+            id: localStorage.getItem('foodGalleryUserId') || (typeof crypto !== 'undefined' ? crypto.randomUUID() : 'user-' + Math.random().toString(36)),
             name: localStorage.getItem('foodGalleryUserName') || 'Anonymous'
         };
         
@@ -225,23 +279,49 @@
             localStorage.setItem('foodGalleryUserName', currentUser.name);
         }
         
-        // API base URL
-        const API_BASE = window.location.origin || 'http://localhost:5000';
+        // Escape food name for use in HTML attributes
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
         
         // Create star rating HTML
         function createStarRating(foodName, rating = 0, editable = true) {
             let stars = '';
+            const safeFoodName = escapeHtml(foodName);
             for (let i = 1; i <= 5; i++) {
                 const filled = i <= rating;
-                stars += `<span class="star ${filled ? 'active' : ''}" data-value="${i}" ${editable ? `onclick="rateFood('${foodName}', ${i})"` : ''}>★</span>`;
+                const starChar = filled ? '★' : '☆';
+                if (editable && backendAvailable) {
+                    stars += `<span class="star ${filled ? 'active' : ''}" data-value="${i}" onclick="rateFood('${safeFoodName}', ${i}, this)">${starChar}</span>`;
+                } else {
+                    stars += `<span class="star ${filled ? 'active' : ''}">${starChar}</span>`;
+                }
             }
-            return `<div class="star-rating" ${!editable ? 'style="pointer-events: none;"' : ''}>${stars}</div>`;
+            return `<div class="star-rating" ${!editable || !backendAvailable ? 'style="pointer-events: none; opacity: 0.7;"' : ''}>${stars}</div>`;
         }
         
         // Rate food
-        async function rateFood(foodName, rating) {
+        async function rateFood(foodName, rating, element) {
+            if (!backendAvailable) {
+                showStatus('Backend server is not running. Cannot submit rating.', true);
+                return;
+            }
+            
+            // Visual feedback - highlight selected stars
+            const parent = element.parentElement;
+            const stars = parent.querySelectorAll('.star');
+            stars.forEach((star, idx) => {
+                if (idx < rating) {
+                    star.classList.add('active');
+                } else {
+                    star.classList.remove('active');
+                }
+            });
+            
             try {
-                const response = await fetch(`${API_BASE}/api/food/${encodeURIComponent(foodName)}/rate`, {
+                const response = await fetch(`/api/food/${encodeURIComponent(foodName)}/rate`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -252,19 +332,32 @@
                 const data = await response.json();
                 if (response.ok) {
                     updateFoodCard(foodName);
+                } else {
+                    showStatus(data.error || 'Error submitting rating', true);
                 }
             } catch (error) {
                 console.error('Error rating:', error);
+                showStatus('Failed to submit rating. Check console for details.', true);
             }
         }
         
         // Submit comment
         async function submitComment(foodName, inputId) {
+            if (!backendAvailable) {
+                showStatus('Backend server is not running. Cannot submit comment.', true);
+                return;
+            }
+            
             const text = document.getElementById(inputId).value.trim();
             if (!text) return;
             
+            const button = document.querySelector(`#${inputId} + .submit-btn`);
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Posting...';
+            
             try {
-                const response = await fetch(`${API_BASE}/api/food/${encodeURIComponent(foodName)}/comment`, {
+                const response = await fetch(`/api/food/${encodeURIComponent(foodName)}/comment`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -277,9 +370,15 @@
                 if (response.ok) {
                     document.getElementById(inputId).value = '';
                     updateFoodCard(foodName);
+                } else {
+                    showStatus(data.error || 'Error submitting comment', true);
                 }
             } catch (error) {
                 console.error('Error commenting:', error);
+                showStatus('Failed to submit comment. Check console for details.', true);
+            } finally {
+                button.disabled = false;
+                button.textContent = originalText;
             }
         }
         
@@ -289,22 +388,28 @@
             if (name) {
                 currentUser.name = name;
                 saveUserInfo();
-                // Refresh all cards to show new name
-                document.querySelectorAll('.card').forEach(card => {
-                    const foodName = card.dataset.foodName;
-                    if (foodName) updateFoodCard(foodName);
-                });
             }
         }
         
         // Fetch food data
         async function fetchFoodData(foodName) {
+            if (!backendAvailable) {
+                return {
+                    comments: [],
+                    ratings: [],
+                    community_note: 'Backend server not running. Comments and ratings require the Flask server.'
+                };
+            }
+            
             try {
-                const response = await fetch(`${API_BASE}/api/food/${encodeURIComponent(foodName)}`);
-                return await response.json();
+                const response = await fetch(`/api/food/${encodeURIComponent(foodName)}`);
+                if (response.ok) {
+                    return await response.json();
+                }
+                return { comments: [], ratings: [], community_note: 'Error loading data' };
             } catch (error) {
                 console.error('Error fetching data:', error);
-                return { comments: [], ratings: [], community_note: 'Loading...' };
+                return { comments: [], ratings: [], community_note: 'Error loading data' };
             }
         }
         
@@ -314,8 +419,12 @@
             const card = document.querySelector(`[data-food-name="${foodName}"]`);
             if (!card) return;
             
-            const communitySection = card.querySelector('.card-community');
-            if (!communitySection) return;
+            let communitySection = card.querySelector('.card-community');
+            if (!communitySection) {
+                communitySection = document.createElement('div');
+                communitySection.className = 'card-community';
+                card.appendChild(communitySection);
+            }
             
             // Calculate average rating
             const avgRating = data.ratings.length > 0 
@@ -331,37 +440,45 @@
                     <div class="rating-stars-display">${createStarRating(foodName, Math.round(avgRating), false)}</div>
                     <span class="avg-rating">${avgRating}/5 (${data.ratings.length} ratings)</span>
                 </div>
-                
-                <div class="user-info">
-                    <input type="text" id="userName-${foodName}" placeholder="Your name" value="${currentUser.name}" 
-                           onblur="updateUserName('userName-${foodName}')">
-                </div>
-                
-                <div class="rating-section">
-                    <span>Rate: </span>
-                    ${createStarRating(foodName, 0, true)}
-                </div>
-                
-                <div class="comment-form">
-                    <input type="text" id="comment-${foodName}" class="comment-input" placeholder="Add a comment..." 
-                           onkeypress="if(event.key==='Enter') submitComment('${foodName}', 'comment-${foodName}')">
-                    <button class="submit-btn" onclick="submitComment('${foodName}', 'comment-${foodName}')">Post</button>
-                </div>
-                
-                <div class="comments-list">
             `;
+            
+            if (backendAvailable) {
+                html += `
+                    <div class="user-info">
+                        <input type="text" id="userName-${escapeHtml(foodName)}" placeholder="Your name" value="${escapeHtml(currentUser.name)}" 
+                               onblur="updateUserName('userName-${escapeHtml(foodName)}')">
+                    </div>
+                    
+                    <div class="rating-section">
+                        <span>Rate: </span>
+                        ${createStarRating(foodName, 0, true)}
+                    </div>
+                    
+                    <div class="comment-form">
+                        <input type="text" id="comment-${escapeHtml(foodName)}" class="comment-input" placeholder="Add a comment..." 
+                               onkeypress="if(event.key==='Enter') submitComment('${escapeHtml(foodName)}', 'comment-${escapeHtml(foodName)}')">
+                        <button class="submit-btn" onclick="submitComment('${escapeHtml(foodName)}', 'comment-${escapeHtml(foodName)}')">Post</button>
+                    </div>
+                `;
+            } else {
+                html += `<div class="loading">Backend server required for comments and ratings. Run the Flask server on Replit.</div>`;
+            }
+            
+            html += `<div class="comments-list">`;
             
             if (data.comments.length === 0) {
                 html += '<div class="no-comments">No comments yet. Be the first!</div>';
             } else {
                 data.comments.slice(-5).reverse().forEach(comment => {
+                    const date = new Date(comment.timestamp);
+                    const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     html += `
                         <div class="comment-item">
                             <div class="comment-header">
-                                <span><strong>${comment.user_name}</strong></span>
-                                <span>${new Date(comment.timestamp).toLocaleString()}</span>
+                                <span><strong>${escapeHtml(comment.user_name)}</strong></span>
+                                <span>${formattedDate}</span>
                             </div>
-                            <div>${comment.text}</div>
+                            <div>${escapeHtml(comment.text)}</div>
                         </div>
                     `;
                 });
@@ -373,6 +490,7 @@
         
         // Initialize all cards
         async function initCards() {
+            await checkBackend();
             document.querySelectorAll('.card').forEach(card => {
                 const title = card.querySelector('.card-title').textContent;
                 card.dataset.foodName = title;
