@@ -87,10 +87,312 @@
             line-height: 1.5;
             color: #555;
         }
+        
+        /* Comment & Rating System Styles */
+        .card-community {
+            padding: 10px 15px 15px;
+            border-top: 1px solid #eee;
+            background: #fafafa;
+        }
+        .community-note {
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 10px;
+            padding: 8px;
+            background: #fff;
+            border-radius: 4px;
+            border-left: 3px solid #4CAF50;
+        }
+        .rating-section {
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .star-rating {
+            display: flex;
+            gap: 2px;
+            font-size: 1.2rem;
+        }
+        .star {
+            cursor: pointer;
+            color: #ccc;
+            transition: color 0.2s;
+        }
+        .star:hover, .star.active {
+            color: #FFD700;
+        }
+        .avg-rating {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        .comment-form {
+            margin-top: 10px;
+        }
+        .comment-input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+        .comment-input:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+        .submit-btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            margin-top: 5px;
+        }
+        .submit-btn:hover {
+            background: #45a049;
+        }
+        .comments-list {
+            margin-top: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .comment-item {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            font-size: 0.85rem;
+        }
+        .comment-item:last-child {
+            border-bottom: none;
+        }
+        .comment-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 4px;
+        }
+        .rating-count {
+            font-size: 0.85rem;
+            color: #666;
+        }
+        .loading {
+            font-size: 0.85rem;
+            color: #999;
+            text-align: center;
+            padding: 10px;
+        }
+        .user-info {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .user-info input {
+            flex: 1;
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+        .no-comments {
+            font-size: 0.85rem;
+            color: #999;
+            text-align: center;
+            padding: 10px;
+        }
+        .rating-stars-display {
+            display: flex;
+            gap: 2px;
+            font-size: 0.9rem;
+        }
     </style>
 </head>
 <body>
     <div class="page-title">Food Photography Gallery</div>
+    
+    <script>
+        // User session management
+        let currentUser = {
+            id: localStorage.getItem('foodGalleryUserId') || crypto.randomUUID(),
+            name: localStorage.getItem('foodGalleryUserName') || 'Anonymous'
+        };
+        
+        // Save user info
+        function saveUserInfo() {
+            localStorage.setItem('foodGalleryUserId', currentUser.id);
+            localStorage.setItem('foodGalleryUserName', currentUser.name);
+        }
+        
+        // API base URL
+        const API_BASE = window.location.origin || 'http://localhost:5000';
+        
+        // Create star rating HTML
+        function createStarRating(foodName, rating = 0, editable = true) {
+            let stars = '';
+            for (let i = 1; i <= 5; i++) {
+                const filled = i <= rating;
+                stars += `<span class="star ${filled ? 'active' : ''}" data-value="${i}" ${editable ? `onclick="rateFood('${foodName}', ${i})"` : ''}>★</span>`;
+            }
+            return `<div class="star-rating" ${!editable ? 'style="pointer-events: none;"' : ''}>${stars}</div>`;
+        }
+        
+        // Rate food
+        async function rateFood(foodName, rating) {
+            try {
+                const response = await fetch(`${API_BASE}/api/food/${encodeURIComponent(foodName)}/rate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        rating: rating,
+                        user_id: currentUser.id
+                    })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    updateFoodCard(foodName);
+                }
+            } catch (error) {
+                console.error('Error rating:', error);
+            }
+        }
+        
+        // Submit comment
+        async function submitComment(foodName, inputId) {
+            const text = document.getElementById(inputId).value.trim();
+            if (!text) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/food/${encodeURIComponent(foodName)}/comment`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        user_id: currentUser.id,
+                        user_name: currentUser.name
+                    })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    document.getElementById(inputId).value = '';
+                    updateFoodCard(foodName);
+                }
+            } catch (error) {
+                console.error('Error commenting:', error);
+            }
+        }
+        
+        // Update user name
+        function updateUserName(inputId) {
+            const name = document.getElementById(inputId).value.trim();
+            if (name) {
+                currentUser.name = name;
+                saveUserInfo();
+                // Refresh all cards to show new name
+                document.querySelectorAll('.card').forEach(card => {
+                    const foodName = card.dataset.foodName;
+                    if (foodName) updateFoodCard(foodName);
+                });
+            }
+        }
+        
+        // Fetch food data
+        async function fetchFoodData(foodName) {
+            try {
+                const response = await fetch(`${API_BASE}/api/food/${encodeURIComponent(foodName)}`);
+                return await response.json();
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                return { comments: [], ratings: [], community_note: 'Loading...' };
+            }
+        }
+        
+        // Update food card with comments and ratings
+        async function updateFoodCard(foodName) {
+            const data = await fetchFoodData(foodName);
+            const card = document.querySelector(`[data-food-name="${foodName}"]`);
+            if (!card) return;
+            
+            const communitySection = card.querySelector('.card-community');
+            if (!communitySection) return;
+            
+            // Calculate average rating
+            const avgRating = data.ratings.length > 0 
+                ? (data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length).toFixed(1)
+                : 0;
+            
+            // Build HTML
+            let html = `
+                <div class="community-note">
+                    <strong>📊 Community Note:</strong> ${data.community_note}
+                </div>
+                <div class="rating-section">
+                    <div class="rating-stars-display">${createStarRating(foodName, Math.round(avgRating), false)}</div>
+                    <span class="avg-rating">${avgRating}/5 (${data.ratings.length} ratings)</span>
+                </div>
+                
+                <div class="user-info">
+                    <input type="text" id="userName-${foodName}" placeholder="Your name" value="${currentUser.name}" 
+                           onblur="updateUserName('userName-${foodName}')">
+                </div>
+                
+                <div class="rating-section">
+                    <span>Rate: </span>
+                    ${createStarRating(foodName, 0, true)}
+                </div>
+                
+                <div class="comment-form">
+                    <input type="text" id="comment-${foodName}" class="comment-input" placeholder="Add a comment..." 
+                           onkeypress="if(event.key==='Enter') submitComment('${foodName}', 'comment-${foodName}')">
+                    <button class="submit-btn" onclick="submitComment('${foodName}', 'comment-${foodName}')">Post</button>
+                </div>
+                
+                <div class="comments-list">
+            `;
+            
+            if (data.comments.length === 0) {
+                html += '<div class="no-comments">No comments yet. Be the first!</div>';
+            } else {
+                data.comments.slice(-5).reverse().forEach(comment => {
+                    html += `
+                        <div class="comment-item">
+                            <div class="comment-header">
+                                <span><strong>${comment.user_name}</strong></span>
+                                <span>${new Date(comment.timestamp).toLocaleString()}</span>
+                            </div>
+                            <div>${comment.text}</div>
+                        </div>
+                    `;
+                });
+            }
+            
+            html += '</div>';
+            communitySection.innerHTML = html;
+        }
+        
+        // Initialize all cards
+        async function initCards() {
+            document.querySelectorAll('.card').forEach(card => {
+                const title = card.querySelector('.card-title').textContent;
+                card.dataset.foodName = title;
+                
+                // Add community section
+                if (!card.querySelector('.card-community')) {
+                    const communityDiv = document.createElement('div');
+                    communityDiv.className = 'card-community';
+                    communityDiv.innerHTML = '<div class="loading">Loading community data...</div>';
+                    card.appendChild(communityDiv);
+                }
+                
+                // Load data
+                updateFoodCard(title);
+            });
+        }
+        
+        // Initialize on page load
+        window.addEventListener('load', initCards);
+    </script>
     
     <div class="meal-section">
         <div class="meal-title">Breakfast</div>
