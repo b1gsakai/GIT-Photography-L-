@@ -1,6 +1,5 @@
 import json
 import os
-import re
 import uuid
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -10,8 +9,8 @@ from urllib.request import Request, urlopen
 
 
 DATA_FILE = "food_data.json"
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.1-70b-versatile"
+CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions"
+CEREBRAS_MODEL = os.environ.get("CEREBRAS_MODEL", "gpt-oss-120b")
 
 FOOD_ITEMS = [
     "Buttermilk Pancakes",
@@ -67,14 +66,14 @@ def fallback_summary(food_name):
     return f"Community rating: {average:.1f}/5 from {len(ratings)} ratings and {len(comments)} comments."
 
 
-def generate_summary_with_groq(food_name):
+def generate_summary_with_cerebras(food_name):
     item = food_data[food_name]
     ratings = item["ratings"]
     comments = item["comments"]
     if not ratings and not comments:
         return fallback_summary(food_name)
 
-    api_key = os.environ.get("GROQ_API_KEY")
+    api_key = os.environ.get("CEREBRAS_SECRET")
     if not api_key:
         return fallback_summary(food_name)
 
@@ -89,13 +88,13 @@ def generate_summary_with_groq(food_name):
         f"Comments:\n{comment_lines}"
     )
     payload = {
-        "model": GROQ_MODEL,
+        "model": CEREBRAS_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7,
         "max_tokens": 200,
     }
     request = Request(
-        GROQ_API_URL,
+        CEREBRAS_API_URL,
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {api_key}",
@@ -110,7 +109,7 @@ def generate_summary_with_groq(food_name):
         summary = result.get("choices", [{}])[0].get("message", {}).get("content")
         return summary.strip() if summary else fallback_summary(food_name)
     except (HTTPError, URLError, TimeoutError, KeyError, IndexError, TypeError, ValueError) as error:
-        print(f"Groq summary unavailable: {error}", flush=True)
+        print(f"Cerebras summary unavailable: {error}", flush=True)
         return fallback_summary(food_name)
 
 
@@ -157,7 +156,7 @@ class GalleryHandler(SimpleHTTPRequestHandler):
             ensure_food(food_name)
             item = food_data[food_name]
             if item["comments"] or item["ratings"]:
-                item["community_note"] = generate_summary_with_groq(food_name)
+                item["community_note"] = generate_summary_with_cerebras(food_name)
                 save_data()
             self.send_json(200, item)
             return
@@ -193,7 +192,7 @@ class GalleryHandler(SimpleHTTPRequestHandler):
                 self.send_json(400, {"error": "Rating must be between 1 and 5"})
                 return
             food_data[food_name]["ratings"].append(rating)
-            food_data[food_name]["community_note"] = generate_summary_with_groq(food_name)
+            food_data[food_name]["community_note"] = generate_summary_with_cerebras(food_name)
             save_data()
             ratings = food_data[food_name]["ratings"]
             self.send_json(200, {
@@ -217,7 +216,7 @@ class GalleryHandler(SimpleHTTPRequestHandler):
                 "timestamp": datetime.now().isoformat(),
             }
             food_data[food_name]["comments"].append(comment)
-            food_data[food_name]["community_note"] = generate_summary_with_groq(food_name)
+            food_data[food_name]["community_note"] = generate_summary_with_cerebras(food_name)
             save_data()
             self.send_json(200, {
                 "message": "Comment submitted",
@@ -227,7 +226,7 @@ class GalleryHandler(SimpleHTTPRequestHandler):
             return
 
         if action == "refresh":
-            food_data[food_name]["community_note"] = generate_summary_with_groq(food_name)
+            food_data[food_name]["community_note"] = generate_summary_with_cerebras(food_name)
             save_data()
             self.send_json(200, {"community_note": food_data[food_name]["community_note"]})
             return

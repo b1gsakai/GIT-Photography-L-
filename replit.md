@@ -11,4 +11,4 @@ python3 server.py
 ```
 
 The server uses Python's standard library and does not require a package-install step.
-`GROQ_API_KEY` is optional; without it, community notes use a local rating summary.
+`CEREBRAS_SECRET` is optional; without it, community notes use a local rating summary.

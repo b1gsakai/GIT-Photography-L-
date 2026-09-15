@@ -1,1 +1,2 @@
 - [GitHub sync](github-sync.md) — Use the attached GitHub connector for repository writes when the workspace HTTPS remote cannot authenticate.
+- [Cerebras inference access](cerebras-inference.md) — Model discovery can succeed while chat inference is rejected; retain the local summary fallback.
