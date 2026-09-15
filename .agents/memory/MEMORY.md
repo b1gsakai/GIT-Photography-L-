@@ -1,0 +1,1 @@
+- [GitHub sync](github-sync.md) — Use the attached GitHub connector for repository writes when the workspace HTTPS remote cannot authenticate.
