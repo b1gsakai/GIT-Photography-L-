@@ -1,13 +1,14 @@
 # Project setup
 
-This is a vanilla static website built with HTML and CSS.
+This is a food photography gallery with a Python standard-library API server.
 
 ## Run on Replit
 
-Start the `Start application` workflow. It serves the project root on `0.0.0.0:5000` with:
+Start the `Start application` workflow. It runs the project on `0.0.0.0:5000` with:
 
 ```sh
-python3 -m http.server 5000 --bind 0.0.0.0
+python3 server.py
 ```
 
-No dependency installation, environment variables, or secrets are required.
+The server uses Python's standard library and does not require a package-install step.
+`GROQ_API_KEY` is optional; without it, community notes use a local rating summary.

@@ -1,227 +1,247 @@
-from flask import Flask, request, jsonify
-import os
 import json
+import os
+import re
 import uuid
 from datetime import datetime
-import requests
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from urllib.error import HTTPError, URLError
+from urllib.parse import unquote, urlparse
+from urllib.request import Request, urlopen
 
-app = Flask(__name__)
 
-# Enable CORS for all routes
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    return response
+DATA_FILE = "food_data.json"
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL = "llama-3.1-70b-versatile"
 
-# In-memory storage for comments and ratings
-food_data = {}
+FOOD_ITEMS = [
+    "Buttermilk Pancakes",
+    "Smoothie Bowl",
+    "Full English Breakfast",
+    "Creamy Baked Mac and Cheese",
+    "Vegetarian Bean and Rice Burrito",
+    "Air Fryer Grilled Cheese",
+    "Delicious Pizza",
+    "Bacon Cheese Burgers and Chili Cheese Fries",
+    "Hot Dogs on Colored Plates",
+]
 
-# Load existing data if available
 def load_data():
-    global food_data
-    if os.path.exists('food_data.json'):
-        try:
-            with open('food_data.json', 'r') as f:
-                food_data = json.load(f)
-        except:
-            food_data = {}
+    if not os.path.exists(DATA_FILE):
+        return {}
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as data_file:
+            return json.load(data_file)
+    except (OSError, json.JSONDecodeError):
+        return {}
 
-# Save data to file
+
+food_data = load_data()
+
+
 def save_data():
-    with open('food_data.json', 'w') as f:
-        json.dump(food_data, f, indent=2)
+    with open(DATA_FILE, "w", encoding="utf-8") as data_file:
+        json.dump(food_data, data_file, indent=2)
 
-# Initialize data structure for all food items
+
 def init_food_items():
-    food_items = [
-        # Breakfast
-        "Buttermilk Pancakes",
-        "Smoothie Bowl", 
-        "Full English Breakfast",
-        # Lunch
-        "Creamy Baked Mac and Cheese",
-        "Vegetarian Bean and Rice Burrito",
-        "Air Fryer Grilled Cheese",
-        # Dinner
-        "Delicious Pizza",
-        "Bacon Cheese Burgers and Chili Cheese Fries",
-        "Hot Dogs on Colored Plates"
-    ]
-    
-    for item in food_items:
-        if item not in food_data:
-            food_data[item] = {
+    changed = False
+    for food_name in FOOD_ITEMS:
+        if food_name not in food_data:
+            food_data[food_name] = {
                 "comments": [],
                 "ratings": [],
-                "community_note": "No reviews yet. Be the first to rate and comment!"
+                "community_note": "No reviews yet. Be the first to rate and comment!",
             }
-    save_data()
+            changed = True
+    if changed or not os.path.exists(DATA_FILE):
+        save_data()
 
-# Get Groq API key from Replit secrets
-GROQ_API_KEY = os.environ.get('GROQ_API_KEY', '')
+
+def fallback_summary(food_name):
+    item = food_data[food_name]
+    ratings = item["ratings"]
+    comments = item["comments"]
+    if not ratings and not comments:
+        return f"No reviews yet for {food_name}. Be the first to rate and comment!"
+    average = sum(ratings) / len(ratings) if ratings else 0
+    return f"Community rating: {average:.1f}/5 from {len(ratings)} ratings and {len(comments)} comments."
+
 
 def generate_summary_with_groq(food_name):
-    """Use Groq API to generate a community note summary"""
-    if not GROQ_API_KEY:
-        return f"Community feedback for {food_name}: No AI summary available (missing API key)"
-    
-    comments = food_data.get(food_name, {}).get("comments", [])
-    ratings = food_data.get(food_name, {}).get("ratings", [])
-    
-    if not comments and not ratings:
-        return f"No reviews yet for {food_name}. Be the first to rate and comment!"
-    
-    avg_rating = sum(ratings) / len(ratings) if ratings else 0
-    
-    # Prepare prompt for Groq
-    prompt = f"""Summarize the community feedback for this food item. Include the average rating and key themes from comments.
-    
-Food: {food_name}
-Average Rating: {avg_rating:.1f}/5
+    item = food_data[food_name]
+    ratings = item["ratings"]
+    comments = item["comments"]
+    if not ratings and not comments:
+        return fallback_summary(food_name)
 
-Comments:
-{chr(10).join([f'- {c[\"text\"]}' for c in comments[-10:]])}
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        return fallback_summary(food_name)
 
-Provide a concise summary (1-2 sentences) that captures the overall sentiment and key points."""
-    
-    try:
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "llama-3.1-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7,
-                "max_tokens": 200
-            },
-            timeout=30
-        )
-        result = response.json()
-        summary = result.get('choices', [{}])[0].get('message', {}).get('content', '')
-        return summary if summary else f"Community rating: {avg_rating:.1f}/5 - {len(comments)} reviews"
-    except Exception as e:
-        print(f"Groq API error: {e}")
-        avg = sum(ratings) / len(ratings) if ratings else 0
-        return f"Community rating: {avg:.1f}/5 from {len(ratings)} ratings"
-
-@app.route('/api/foods', methods=['GET'])
-def get_foods():
-    """Get all food items with their data"""
-    return jsonify(food_data)
-
-@app.route('/api/food/<food_name>', methods=['GET'])
-def get_food_data(food_name):
-    """Get data for a specific food item"""
-    # Decode URL-encoded food name
-    food_name = food_name.replace('%20', ' ')
-    
-    if food_name not in food_data:
-        init_food_items()
-    
-    data = food_data.get(food_name, {
-        "comments": [],
-        "ratings": [],
-        "community_note": "No reviews yet. Be the first to rate and comment!"
-    })
-    
-    # Regenerate community note
-    if data.get("comments") or data.get("ratings"):
-        data["community_note"] = generate_summary_with_groq(food_name)
-        food_data[food_name] = data
-        save_data()
-    
-    return jsonify(data)
-
-@app.route('/api/food/<food_name>/rate', methods=['POST'])
-def rate_food(food_name):
-    """Submit a rating for a food item"""
-    food_name = food_name.replace('%20', ' ')
-    
-    if food_name not in food_data:
-        init_food_items()
-    
-    data = request.json
-    rating = data.get('rating')
-    user_id = data.get('user_id', str(uuid.uuid4()))
-    
-    if rating is None or rating < 1 or rating > 5:
-        return jsonify({"error": "Rating must be between 1 and 5"}), 400
-    
-    # Add rating
-    food_data[food_name]["ratings"].append(rating)
-    
-    # Regenerate community note
-    food_data[food_name]["community_note"] = generate_summary_with_groq(food_name)
-    
-    save_data()
-    
-    return jsonify({
-        "message": "Rating submitted",
-        "rating": rating,
-        "avg_rating": sum(food_data[food_name]["ratings"]) / len(food_data[food_name]["ratings"]),
-        "community_note": food_data[food_name]["community_note"]
-    })
-
-@app.route('/api/food/<food_name>/comment', methods=['POST'])
-def comment_food(food_name):
-    """Submit a comment for a food item"""
-    food_name = food_name.replace('%20', ' ')
-    
-    if food_name not in food_data:
-        init_food_items()
-    
-    data = request.json
-    text = data.get('text', '').strip()
-    user_id = data.get('user_id', str(uuid.uuid4()))
-    user_name = data.get('user_name', 'Anonymous')
-    
-    if not text:
-        return jsonify({"error": "Comment cannot be empty"}), 400
-    
-    # Add comment
-    comment = {
-        "id": str(uuid.uuid4()),
-        "text": text,
-        "user_id": user_id,
-        "user_name": user_name,
-        "timestamp": datetime.now().isoformat()
+    average = sum(ratings) / len(ratings) if ratings else 0
+    comment_lines = "\n".join(
+        f"- {comment.get('text', '')}" for comment in comments[-10:]
+    )
+    prompt = (
+        "Summarize community feedback for this food item in one or two sentences. "
+        "Mention the average rating and the main themes without inventing details.\n\n"
+        f"Food: {food_name}\nAverage rating: {average:.1f}/5\n"
+        f"Comments:\n{comment_lines}"
+    )
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7,
+        "max_tokens": 200,
     }
-    food_data[food_name]["comments"].append(comment)
-    
-    # Regenerate community note
-    food_data[food_name]["community_note"] = generate_summary_with_groq(food_name)
-    
-    save_data()
-    
-    return jsonify({
-        "message": "Comment submitted",
-        "comment": comment,
-        "community_note": food_data[food_name]["community_note"]
-    })
+    request = Request(
+        GROQ_API_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (compatible; FoodGallery/1.0)",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        summary = result.get("choices", [{}])[0].get("message", {}).get("content")
+        return summary.strip() if summary else fallback_summary(food_name)
+    except (HTTPError, URLError, TimeoutError, KeyError, IndexError, TypeError, ValueError) as error:
+        print(f"Groq summary unavailable: {error}", flush=True)
+        return fallback_summary(food_name)
 
-@app.route('/api/food/<food_name>/refresh', methods=['POST'])
-def refresh_summary(food_name):
-    """Refresh the community note summary"""
-    food_name = food_name.replace('%20', ' ')
-    
+
+def ensure_food(food_name):
     if food_name not in food_data:
-        init_food_items()
-    
-    food_data[food_name]["community_note"] = generate_summary_with_groq(food_name)
-    save_data()
-    
-    return jsonify({
-        "community_note": food_data[food_name]["community_note"]
-    })
+        food_data[food_name] = {
+            "comments": [],
+            "ratings": [],
+            "community_note": "No reviews yet. Be the first to rate and comment!",
+        }
+        save_data()
 
-# Initialize data on startup
-load_data()
-init_food_items()
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+class GalleryHandler(SimpleHTTPRequestHandler):
+    def send_json(self, status, payload):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def read_json(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        if length > 16_384:
+            raise ValueError("Request is too large")
+        return json.loads(self.rfile.read(length).decode("utf-8"))
+
+    def food_name_from_path(self):
+        prefix = "/api/food/"
+        return unquote(urlparse(self.path).path[len(prefix):])
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path == "/api/foods":
+            self.send_json(200, food_data)
+            return
+        if path.startswith("/api/food/"):
+            food_name = self.food_name_from_path()
+            if not food_name:
+                self.send_json(400, {"error": "Food name is required"})
+                return
+            ensure_food(food_name)
+            item = food_data[food_name]
+            if item["comments"] or item["ratings"]:
+                item["community_note"] = generate_summary_with_groq(food_name)
+                save_data()
+            self.send_json(200, item)
+            return
+        super().do_GET()
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        if not path.startswith("/api/food/"):
+            self.send_json(404, {"error": "Not found"})
+            return
+
+        parts = path.split("/")
+        if len(parts) < 5:
+            self.send_json(404, {"error": "Not found"})
+            return
+
+        food_name = unquote("/".join(parts[3:-1]))
+        action = parts[-1]
+        if not food_name:
+            self.send_json(400, {"error": "Food name is required"})
+            return
+        ensure_food(food_name)
+
+        try:
+            payload = self.read_json()
+        except (ValueError, json.JSONDecodeError):
+            self.send_json(400, {"error": "Valid JSON is required"})
+            return
+
+        if action == "rate":
+            rating = payload.get("rating")
+            if not isinstance(rating, (int, float)) or isinstance(rating, bool) or not 1 <= rating <= 5:
+                self.send_json(400, {"error": "Rating must be between 1 and 5"})
+                return
+            food_data[food_name]["ratings"].append(rating)
+            food_data[food_name]["community_note"] = generate_summary_with_groq(food_name)
+            save_data()
+            ratings = food_data[food_name]["ratings"]
+            self.send_json(200, {
+                "message": "Rating submitted",
+                "rating": rating,
+                "avg_rating": sum(ratings) / len(ratings),
+                "community_note": food_data[food_name]["community_note"],
+            })
+            return
+
+        if action == "comment":
+            text = str(payload.get("text", "")).strip()
+            if not text:
+                self.send_json(400, {"error": "Comment cannot be empty"})
+                return
+            comment = {
+                "id": str(uuid.uuid4()),
+                "text": text,
+                "user_id": payload.get("user_id", str(uuid.uuid4())),
+                "user_name": payload.get("user_name", "Anonymous"),
+                "timestamp": datetime.now().isoformat(),
+            }
+            food_data[food_name]["comments"].append(comment)
+            food_data[food_name]["community_note"] = generate_summary_with_groq(food_name)
+            save_data()
+            self.send_json(200, {
+                "message": "Comment submitted",
+                "comment": comment,
+                "community_note": food_data[food_name]["community_note"],
+            })
+            return
+
+        if action == "refresh":
+            food_data[food_name]["community_note"] = generate_summary_with_groq(food_name)
+            save_data()
+            self.send_json(200, {"community_note": food_data[food_name]["community_note"]})
+            return
+
+        self.send_json(404, {"error": "Not found"})
+
+
+if __name__ == "__main__":
+    init_food_items()
+    server = ThreadingHTTPServer(("0.0.0.0", 5000), GalleryHandler)
+    print("Serving food gallery on 0.0.0.0 port 5000", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
