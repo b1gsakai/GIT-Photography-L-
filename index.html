@@ -235,6 +235,11 @@
         .status-bar.show {
             display: block;
         }
+        .selected-rating-display {
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -245,6 +250,9 @@
         // Check if backend is available
         let backendAvailable = false;
         const API_BASE = '';
+        
+        // Store pending ratings per food item
+        const pendingRatings = {};
         
         async function checkBackend() {
             try {
@@ -292,9 +300,9 @@
             const safeFoodName = escapeHtml(foodName);
             for (let i = 1; i <= 5; i++) {
                 const filled = i <= rating;
-                const starChar = filled ? '★' : '☆';
+                const starChar = filled ? '\u2605' : '\u2606';
                 if (editable && backendAvailable) {
-                    stars += `<span class="star ${filled ? 'active' : ''}" data-value="${i}" onclick="rateFood('${safeFoodName}', ${i}, this)">${starChar}</span>`;
+                    stars += `<span class="star ${filled ? 'active' : ''}" data-value="${i}" onclick="selectRating('${safeFoodName}', ${i}, this)">${starChar}</span>`;
                 } else {
                     stars += `<span class="star ${filled ? 'active' : ''}">${starChar}</span>`;
                 }
@@ -302,12 +310,15 @@
             return `<div class="star-rating" ${!editable || !backendAvailable ? 'style="pointer-events: none; opacity: 0.7;"' : ''}>${stars}</div>`;
         }
         
-        // Rate food
-        async function rateFood(foodName, rating, element) {
+        // Select a rating (doesn't submit yet)
+        function selectRating(foodName, rating, element) {
             if (!backendAvailable) {
-                showStatus('Backend server is not running. Cannot submit rating.', true);
+                showStatus('Backend server is not running.', true);
                 return;
             }
+            
+            // Store the pending rating
+            pendingRatings[foodName] = rating;
             
             // Visual feedback - highlight selected stars
             const parent = element.parentElement;
@@ -320,6 +331,20 @@
                 }
             });
             
+            // Show selected rating
+            const display = parent.parentElement.querySelector('.selected-rating-display');
+            if (display) {
+                display.textContent = `Selected: ${rating}/5`;
+            }
+        }
+        
+        // Rate food (called from comment submission)
+        async function rateFood(foodName, rating) {
+            if (!backendAvailable) {
+                showStatus('Backend server is not running. Cannot submit rating.', true);
+                return null;
+            }
+            
             try {
                 const response = await fetch(`/api/food/${encodeURIComponent(foodName)}/rate`, {
                     method: 'POST',
@@ -331,17 +356,21 @@
                 });
                 const data = await response.json();
                 if (response.ok) {
-                    updateFoodCard(foodName);
+                    // Clear pending rating after successful submit
+                    delete pendingRatings[foodName];
+                    return data;
                 } else {
                     showStatus(data.error || 'Error submitting rating', true);
+                    return null;
                 }
             } catch (error) {
                 console.error('Error rating:', error);
                 showStatus('Failed to submit rating. Check console for details.', true);
+                return null;
             }
         }
         
-        // Submit comment
+        // Submit comment (and rating if one was selected)
         async function submitComment(foodName, inputId) {
             if (!backendAvailable) {
                 showStatus('Backend server is not running. Cannot submit comment.', true);
@@ -349,7 +378,10 @@
             }
             
             const text = document.getElementById(inputId).value.trim();
-            if (!text) return;
+            if (!text) {
+                showStatus('Please write a comment before submitting.', true);
+                return;
+            }
             
             const button = document.querySelector(`#${inputId} + .submit-btn`);
             const originalText = button.textContent;
@@ -357,7 +389,8 @@
             button.textContent = 'Posting...';
             
             try {
-                const response = await fetch(`/api/food/${encodeURIComponent(foodName)}/comment`, {
+                // Submit comment
+                const commentResponse = await fetch(`/api/food/${encodeURIComponent(foodName)}/comment`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -366,8 +399,15 @@
                         user_name: currentUser.name
                     })
                 });
-                const data = await response.json();
-                if (response.ok) {
+                
+                // Also submit rating if one was selected
+                const pendingRating = pendingRatings[foodName];
+                if (pendingRating) {
+                    await rateFood(foodName, pendingRating);
+                }
+                
+                const data = await commentResponse.json();
+                if (commentResponse.ok) {
                     document.getElementById(inputId).value = '';
                     updateFoodCard(foodName);
                 } else {
@@ -431,10 +471,13 @@
                 ? (data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length).toFixed(1)
                 : 0;
             
+            // Get pending rating for this food
+            const pendingRating = pendingRatings[foodName] || 0;
+            
             // Build HTML
             let html = `
                 <div class="community-note">
-                    <strong>📊 Community Note:</strong> ${data.community_note}
+                    <strong>\ud83d\udcca Community Note:</strong> ${data.community_note}
                 </div>
                 <div class="rating-section">
                     <div class="rating-stars-display">${createStarRating(foodName, Math.round(avgRating), false)}</div>
@@ -451,13 +494,14 @@
                     
                     <div class="rating-section">
                         <span>Rate: </span>
-                        ${createStarRating(foodName, 0, true)}
+                        ${createStarRating(foodName, pendingRating, true)}
                     </div>
+                    <div class="selected-rating-display" id="rating-display-${escapeHtml(foodName)}"></div>
                     
                     <div class="comment-form">
                         <input type="text" id="comment-${escapeHtml(foodName)}" class="comment-input" placeholder="Add a comment..." 
                                onkeypress="if(event.key==='Enter') submitComment('${escapeHtml(foodName)}', 'comment-${escapeHtml(foodName)}')">
-                        <button class="submit-btn" onclick="submitComment('${escapeHtml(foodName)}', 'comment-${escapeHtml(foodName)}')">Post</button>
+                        <button class="submit-btn" onclick="submitComment('${escapeHtml(foodName)}', 'comment-${escapeHtml(foodName)}')">Post Comment & Rating</button>
                     </div>
                 `;
             } else {
