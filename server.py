@@ -79,7 +79,7 @@ def generate_summary_with_cerebras(food_name):
 
     average = sum(ratings) / len(ratings) if ratings else 0
     comment_lines = "\n".join(
-        f"- {comment.get('text', '')}" for comment in comments[-10:]
+        f"- {comment.get('text', '')}" for comment in comments
     )
     prompt = (
         "Summarize community feedback for this food item in one or two sentences. "
@@ -111,6 +111,24 @@ def generate_summary_with_cerebras(food_name):
     except (HTTPError, URLError, TimeoutError, KeyError, IndexError, TypeError, ValueError) as error:
         print(f"Cerebras summary unavailable: {error}", flush=True)
         return fallback_summary(food_name)
+
+
+def validate_review_payload(payload):
+    rating = payload.get("rating")
+    if (
+        not isinstance(rating, int)
+        or isinstance(rating, bool)
+        or not 1 <= rating <= 5
+    ):
+        return None, "Choose a star rating from 1 to 5."
+
+    text = str(payload.get("text", "")).strip()
+    if not text:
+        return None, "Write a comment before submitting your review."
+    if len(text) > 2_000:
+        return None, "Comments must be 2,000 characters or fewer."
+
+    return {"rating": rating, "text": text}, None
 
 
 def ensure_food(food_name):
@@ -154,11 +172,7 @@ class GalleryHandler(SimpleHTTPRequestHandler):
                 self.send_json(400, {"error": "Food name is required"})
                 return
             ensure_food(food_name)
-            item = food_data[food_name]
-            if item["comments"] or item["ratings"]:
-                item["community_note"] = generate_summary_with_cerebras(food_name)
-                save_data()
-            self.send_json(200, item)
+            self.send_json(200, food_data[food_name])
             return
         super().do_GET()
 
@@ -186,49 +200,57 @@ class GalleryHandler(SimpleHTTPRequestHandler):
             self.send_json(400, {"error": "Valid JSON is required"})
             return
 
-        if action == "rate":
-            rating = payload.get("rating")
-            if not isinstance(rating, (int, float)) or isinstance(rating, bool) or not 1 <= rating <= 5:
-                self.send_json(400, {"error": "Rating must be between 1 and 5"})
+        if action in ("rate", "comment", "review"):
+            if action != "review":
+                self.send_json(
+                    400,
+                    {
+                        "error": (
+                            "Ratings and comments must be submitted together "
+                            "using the review endpoint."
+                        )
+                    },
+                )
                 return
-            food_data[food_name]["ratings"].append(rating)
+
+            review, error = validate_review_payload(payload)
+            if error:
+                self.send_json(400, {"error": error})
+                return
+
+            comment = {
+                "id": str(uuid.uuid4()),
+                "text": review["text"],
+                "user_id": str(payload.get("user_id") or str(uuid.uuid4())),
+                "user_name": str(payload.get("user_name") or "Anonymous").strip(),
+                "timestamp": datetime.now().isoformat(),
+            }
+            food_data[food_name]["ratings"].append(review["rating"])
+            food_data[food_name]["comments"].append(comment)
+
+            # Persist the review before making the external request so the
+            # user's rating and comment survive even if AI is unavailable.
+            save_data()
             food_data[food_name]["community_note"] = generate_summary_with_cerebras(food_name)
             save_data()
             ratings = food_data[food_name]["ratings"]
             self.send_json(200, {
-                "message": "Rating submitted",
-                "rating": rating,
+                "message": "Review submitted and community note updated",
+                "comment": comment,
+                "rating": review["rating"],
                 "avg_rating": sum(ratings) / len(ratings),
                 "community_note": food_data[food_name]["community_note"],
             })
             return
 
-        if action == "comment":
-            text = str(payload.get("text", "")).strip()
-            if not text:
-                self.send_json(400, {"error": "Comment cannot be empty"})
-                return
-            comment = {
-                "id": str(uuid.uuid4()),
-                "text": text,
-                "user_id": payload.get("user_id", str(uuid.uuid4())),
-                "user_name": payload.get("user_name", "Anonymous"),
-                "timestamp": datetime.now().isoformat(),
-            }
-            food_data[food_name]["comments"].append(comment)
-            food_data[food_name]["community_note"] = generate_summary_with_cerebras(food_name)
-            save_data()
-            self.send_json(200, {
-                "message": "Comment submitted",
-                "comment": comment,
-                "community_note": food_data[food_name]["community_note"],
-            })
-            return
-
         if action == "refresh":
-            food_data[food_name]["community_note"] = generate_summary_with_cerebras(food_name)
-            save_data()
-            self.send_json(200, {"community_note": food_data[food_name]["community_note"]})
+            self.send_json(
+                200,
+                {
+                    "community_note": food_data[food_name]["community_note"],
+                    "message": "Community note is refreshed when a new review is submitted.",
+                },
+            )
             return
 
         self.send_json(404, {"error": "Not found"})

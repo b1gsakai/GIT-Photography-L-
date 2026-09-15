@@ -240,6 +240,11 @@
             color: #666;
             margin-top: 5px;
         }
+        .review-requirement {
+            font-size: 0.8rem;
+            color: #777;
+            margin: 2px 0 6px;
+        }
     </style>
 </head>
 <body>
@@ -338,39 +343,7 @@
             }
         }
         
-        // Rate food (called from comment submission)
-        async function rateFood(foodName, rating) {
-            if (!backendAvailable) {
-                showStatus('Backend server is not running. Cannot submit rating.', true);
-                return null;
-            }
-            
-            try {
-                const response = await fetch(`/api/food/${encodeURIComponent(foodName)}/rate`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        rating: rating,
-                        user_id: currentUser.id
-                    })
-                });
-                const data = await response.json();
-                if (response.ok) {
-                    // Clear pending rating after successful submit
-                    delete pendingRatings[foodName];
-                    return data;
-                } else {
-                    showStatus(data.error || 'Error submitting rating', true);
-                    return null;
-                }
-            } catch (error) {
-                console.error('Error rating:', error);
-                showStatus('Failed to submit rating. Check console for details.', true);
-                return null;
-            }
-        }
-        
-        // Submit comment (and rating if one was selected)
+        // Submit a rating and comment together as one review
         async function submitComment(foodName, inputId) {
             if (!backendAvailable) {
                 showStatus('Backend server is not running. Cannot submit comment.', true);
@@ -382,6 +355,12 @@
                 showStatus('Please write a comment before submitting.', true);
                 return;
             }
+
+            const pendingRating = pendingRatings[foodName];
+            if (!pendingRating) {
+                showStatus('Please choose a star rating before submitting.', true);
+                return;
+            }
             
             const button = document.querySelector(`#${inputId} + .submit-btn`);
             const originalText = button.textContent;
@@ -389,27 +368,22 @@
             button.textContent = 'Posting...';
             
             try {
-                // Submit comment
-                const commentResponse = await fetch(`/api/food/${encodeURIComponent(foodName)}/comment`, {
+                const reviewResponse = await fetch(`/api/food/${encodeURIComponent(foodName)}/review`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         text: text,
+                        rating: pendingRating,
                         user_id: currentUser.id,
                         user_name: currentUser.name
                     })
                 });
-                
-                // Also submit rating if one was selected
-                const pendingRating = pendingRatings[foodName];
-                if (pendingRating) {
-                    await rateFood(foodName, pendingRating);
-                }
-                
-                const data = await commentResponse.json();
-                if (commentResponse.ok) {
+                const data = await reviewResponse.json();
+                if (reviewResponse.ok) {
+                    delete pendingRatings[foodName];
                     document.getElementById(inputId).value = '';
                     updateFoodCard(foodName);
+                    showStatus('Review posted and community note updated.', false);
                 } else {
                     showStatus(data.error || 'Error submitting comment', true);
                 }
@@ -477,7 +451,7 @@
             // Build HTML
             let html = `
                 <div class="community-note">
-                    <strong>\ud83d\udcca Community Note:</strong> ${data.community_note}
+                    <strong>\ud83d\udcca Community Note:</strong> ${escapeHtml(data.community_note)}
                 </div>
                 <div class="rating-section">
                     <div class="rating-stars-display">${createStarRating(foodName, Math.round(avgRating), false)}</div>
@@ -496,12 +470,13 @@
                         <span>Rate: </span>
                         ${createStarRating(foodName, pendingRating, true)}
                     </div>
+                    <div class="review-requirement">Choose a rating and write a comment before posting.</div>
                     <div class="selected-rating-display" id="rating-display-${escapeHtml(foodName)}"></div>
                     
                     <div class="comment-form">
                         <input type="text" id="comment-${escapeHtml(foodName)}" class="comment-input" placeholder="Add a comment..." 
                                onkeypress="if(event.key==='Enter') submitComment('${escapeHtml(foodName)}', 'comment-${escapeHtml(foodName)}')">
-                        <button class="submit-btn" onclick="submitComment('${escapeHtml(foodName)}', 'comment-${escapeHtml(foodName)}')">Post Comment & Rating</button>
+                        <button class="submit-btn" onclick="submitComment('${escapeHtml(foodName)}', 'comment-${escapeHtml(foodName)}')">Post Review</button>
                     </div>
                 `;
             } else {
