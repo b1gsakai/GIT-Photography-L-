@@ -388,7 +388,8 @@
                     delete pendingRatings[foodName];
                     document.getElementById(inputId).value = '';
                     updateFoodCard(foodName);
-                    showStatus('Review posted and community note updated.', false);
+                    showStatus('Review posted. Community note is updating.', false);
+                    setTimeout(() => updateFoodCard(foodName), 1500);
                 } else {
                     showStatus(data.error || 'Error submitting comment', true);
                 }

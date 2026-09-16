@@ -3,6 +3,7 @@ import os
 import uuid
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from threading import Lock, Thread
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
@@ -11,6 +12,7 @@ from urllib.request import Request, urlopen
 DATA_FILE = "food_data.json"
 CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions"
 CEREBRAS_MODEL = os.environ.get("CEREBRAS_MODEL", "gpt-oss-120b")
+SUMMARY_LOCK = Lock()
 
 FOOD_ITEMS = [
     "Buttermilk Pancakes",
@@ -111,6 +113,17 @@ def generate_summary_with_cerebras(food_name):
     except (HTTPError, URLError, TimeoutError, KeyError, IndexError, TypeError, ValueError) as error:
         print(f"Cerebras summary unavailable: {error}", flush=True)
         return fallback_summary(food_name)
+
+
+def update_cached_community_note(food_name):
+    try:
+        with SUMMARY_LOCK:
+            food_data[food_name]["community_note"] = generate_summary_with_cerebras(
+                food_name
+            )
+            save_data()
+    except (KeyError, OSError, TypeError, ValueError) as error:
+        print(f"Could not save community note: {error}", flush=True)
 
 
 def validate_review_payload(payload):
@@ -230,17 +243,25 @@ class GalleryHandler(SimpleHTTPRequestHandler):
 
             # Persist the review before making the external request so the
             # user's rating and comment survive even if AI is unavailable.
+            food_data[food_name]["community_note"] = fallback_summary(food_name)
             save_data()
-            food_data[food_name]["community_note"] = generate_summary_with_cerebras(food_name)
-            save_data()
+            Thread(
+                target=update_cached_community_note,
+                args=(food_name,),
+                daemon=True,
+            ).start()
             ratings = food_data[food_name]["ratings"]
-            self.send_json(200, {
-                "message": "Review submitted and community note updated",
-                "comment": comment,
-                "rating": review["rating"],
-                "avg_rating": sum(ratings) / len(ratings),
-                "community_note": food_data[food_name]["community_note"],
-            })
+            self.send_json(
+                202,
+                {
+                    "message": "Review submitted; community note is updating",
+                    "comment": comment,
+                    "rating": review["rating"],
+                    "avg_rating": sum(ratings) / len(ratings),
+                    "community_note": food_data[food_name]["community_note"],
+                    "community_note_pending": True,
+                },
+            )
             return
 
         if action == "refresh":
