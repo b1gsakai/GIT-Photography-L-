@@ -362,7 +362,12 @@
                 return;
             }
             
-            const button = document.querySelector(`#${inputId} + .submit-btn`);
+            const input = document.getElementById(inputId);
+            const button = input && input.parentElement.querySelector('.submit-btn');
+            if (!button) {
+                showStatus('Unable to find the review button. Please reload the page.', true);
+                return;
+            }
             const originalText = button.textContent;
             button.disabled = true;
             button.textContent = 'Posting...';
