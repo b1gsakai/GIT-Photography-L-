@@ -560,31 +560,29 @@
             `;
         }
 
-        function openAuthPanel(mode) {
+        async function openAuthPanel(mode) {
             if (!clerkClient) {
                 showStatus('Authentication is still loading. Please try again.', true);
                 return;
             }
-            const panel = document.getElementById('authPanel');
-            const mount = document.getElementById('authMount');
-            mount.innerHTML = '';
-            panel.hidden = false;
-            if (mode === 'sign-up') {
-                clerkClient.mountSignUp(mount, {
-                    signInUrl: window.location.href
-                });
-            } else {
-                clerkClient.mountSignIn(mount, {
-                    signUpUrl: window.location.href
-                });
+            try {
+                closeAuthPanel();
+                if (mode === 'sign-up') {
+                    await clerkClient.openSignUp();
+                } else {
+                    await clerkClient.openSignIn();
+                }
+            } catch (error) {
+                console.error('Unable to open authentication:', error);
+                showStatus('Unable to open sign-up. Please reload and try again.', true);
             }
         }
 
         function closeAuthPanel() {
             const panel = document.getElementById('authPanel');
             if (clerkClient) {
-                clerkClient.unmountSignIn?.(document.getElementById('authMount'));
-                clerkClient.unmountSignUp?.(document.getElementById('authMount'));
+                clerkClient.closeSignIn?.();
+                clerkClient.closeSignUp?.();
             }
             panel.hidden = true;
             document.getElementById('authMount').innerHTML = '';
