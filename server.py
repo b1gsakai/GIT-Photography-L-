@@ -1,9 +1,15 @@
 import json
+import base64
+import hashlib
+import hmac
 import os
+import time
 import uuid
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock, Thread
+from http.cookies import SimpleCookie
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
@@ -13,6 +19,10 @@ DATA_FILE = "food_data.json"
 CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions"
 CEREBRAS_MODEL = os.environ.get("CEREBRAS_MODEL", "gpt-oss-120b")
 SUMMARY_LOCK = Lock()
+JWKS_LOCK = Lock()
+JWKS_CACHE = {"expires_at": 0, "keys": []}
+CLERK_PUBLISHABLE_KEY = os.environ.get("CLERK_PUBLISHABLE_KEY", "")
+CLERK_SECRET_KEY = os.environ.get("CLERK_SECRET_KEY", "")
 
 FOOD_ITEMS = [
     "Buttermilk Pancakes",
@@ -126,6 +136,99 @@ def update_cached_community_note(food_name):
         print(f"Could not save community note: {error}", flush=True)
 
 
+def decode_base64url(value):
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def get_clerk_jwks():
+    now = time.time()
+    if JWKS_CACHE["expires_at"] > now:
+        return JWKS_CACHE["keys"]
+    if not CLERK_SECRET_KEY:
+        return []
+
+    request = Request(
+        "https://api.clerk.com/v1/jwks",
+        headers={"Authorization": f"Bearer {CLERK_SECRET_KEY}"},
+    )
+    with JWKS_LOCK:
+        if JWKS_CACHE["expires_at"] > time.time():
+            return JWKS_CACHE["keys"]
+        with urlopen(request, timeout=10) as response:
+            keys = json.loads(response.read().decode("utf-8")).get("keys", [])
+        JWKS_CACHE["keys"] = keys
+        JWKS_CACHE["expires_at"] = time.time() + 3600
+        return keys
+
+
+def verify_clerk_session_token(token):
+    try:
+        header_part, payload_part, signature_part = token.split(".")
+        header = json.loads(decode_base64url(header_part))
+        payload = json.loads(decode_base64url(payload_part))
+        if header.get("alg") != "RS256":
+            return None
+
+        key = next(
+            (candidate for candidate in get_clerk_jwks() if candidate.get("kid") == header.get("kid")),
+            None,
+        )
+        if not key:
+            return None
+
+        modulus = int.from_bytes(decode_base64url(key["n"]), "big")
+        exponent = int.from_bytes(decode_base64url(key["e"]), "big")
+        signature = int.from_bytes(decode_base64url(signature_part), "big")
+        decoded_signature = pow(signature, exponent, modulus).to_bytes(
+            (modulus.bit_length() + 7) // 8,
+            "big",
+        )
+        digest = hashlib.sha256(
+            f"{header_part}.{payload_part}".encode("ascii")
+        ).digest()
+        digest_info = bytes.fromhex(
+            "3031300d060960864801650304020105000420"
+        ) + digest
+        expected = b"\x00\x01" + b"\xff" * (
+            len(decoded_signature) - len(digest_info) - 3
+        ) + b"\x00" + digest_info
+        if not hmac.compare_digest(decoded_signature, expected):
+            return None
+
+        now = int(time.time())
+        if payload.get("exp") is not None and now >= int(payload["exp"]):
+            return None
+        if payload.get("nbf") is not None and now < int(payload["nbf"]):
+            return None
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+        return {"user_id": user_id, "session_id": payload.get("sid")}
+    except (
+        KeyError,
+        ValueError,
+        TypeError,
+        IndexError,
+        json.JSONDecodeError,
+        OSError,
+        HTTPError,
+        URLError,
+        TimeoutError,
+    ):
+        return None
+
+
+def authenticated_user(handler):
+    cookies = SimpleCookie(handler.headers.get("Cookie", ""))
+    session_cookie = cookies.get("__session")
+    token = session_cookie.value if session_cookie else ""
+    if not token:
+        authorization = handler.headers.get("Authorization", "")
+        if authorization.startswith("Bearer "):
+            token = authorization[7:].strip()
+    return verify_clerk_session_token(token) if token else None
+
+
 def validate_review_payload(payload):
     rating = payload.get("rating")
     if (
@@ -174,10 +277,37 @@ class GalleryHandler(SimpleHTTPRequestHandler):
         prefix = "/api/food/"
         return unquote(urlparse(self.path).path[len(prefix):])
 
+    def send_index(self):
+        try:
+            body = Path("index.html").read_text(encoding="utf-8")
+        except OSError:
+            self.send_error(404)
+            return
+        body = body.replace(
+            "__CLERK_PUBLISHABLE_KEY__",
+            json.dumps(CLERK_PUBLISHABLE_KEY),
+        )
+        encoded = body.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
     def do_GET(self):
         path = urlparse(self.path).path
+        if path in ("/", "/index.html"):
+            self.send_index()
+            return
         if path == "/api/foods":
             self.send_json(200, food_data)
+            return
+        if path == "/api/auth/me":
+            user = authenticated_user(self)
+            if not user:
+                self.send_json(401, {"authenticated": False})
+                return
+            self.send_json(200, {"authenticated": True, "user_id": user["user_id"]})
             return
         if path.startswith("/api/food/"):
             food_name = self.food_name_from_path()
@@ -226,6 +356,14 @@ class GalleryHandler(SimpleHTTPRequestHandler):
                 )
                 return
 
+            auth_user = authenticated_user(self)
+            if not auth_user:
+                self.send_json(
+                    401,
+                    {"error": "Sign in or create an account before posting a review."},
+                )
+                return
+
             review, error = validate_review_payload(payload)
             if error:
                 self.send_json(400, {"error": error})
@@ -234,8 +372,9 @@ class GalleryHandler(SimpleHTTPRequestHandler):
             comment = {
                 "id": str(uuid.uuid4()),
                 "text": review["text"],
-                "user_id": str(payload.get("user_id") or str(uuid.uuid4())),
-                "user_name": str(payload.get("user_name") or "Anonymous").strip(),
+                "rating": review["rating"],
+                "user_id": auth_user["user_id"],
+                "user_name": str(payload.get("user_name") or "Member").strip(),
                 "timestamp": datetime.now().isoformat(),
             }
             food_data[food_name]["ratings"].append(review["rating"])
