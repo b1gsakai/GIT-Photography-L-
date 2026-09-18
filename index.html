@@ -14,14 +14,21 @@
             font-family: Arial, sans-serif;
             background-color: #f5f5f5;
             padding: 20px;
-            position: relative;
+        }
+        .top-band {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            min-height: 82px;
+            margin: -20px -20px 24px;
+            padding: 16px 20px;
+            background: #d1d1d1;
         }
         .page-title {
             text-align: center;
             font-size: 2.5rem;
             font-weight: bold;
             margin-bottom: 30px;
-            padding: 0 180px;
             color: #333;
         }
         .meal-section {
@@ -197,10 +204,6 @@
             padding: 10px;
         }
         .auth-bar {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            z-index: 2;
             display: flex;
             align-items: center;
             gap: 12px;
@@ -216,10 +219,12 @@
             background: #4CAF50;
             color: white;
             border: none;
-            padding: 7px 12px;
+            min-width: 125px;
+            padding: 14px 24px;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 0.85rem;
+            font-size: 1.05rem;
+            font-weight: 700;
         }
         .auth-btn.secondary {
             background: #607d8b;
@@ -228,16 +233,22 @@
             filter: brightness(0.95);
         }
         @media (max-width: 600px) {
-            .page-title {
-                padding: 45px 0 0;
-                font-size: 2rem;
+            .top-band {
+                justify-content: center;
+                min-height: 74px;
+                padding: 12px;
             }
             .auth-bar {
-                top: 12px;
-                right: 12px;
+                width: 100%;
+                justify-content: center;
             }
-            .auth-user {
-                display: none;
+            .auth-actions {
+                width: 100%;
+                justify-content: center;
+            }
+            .auth-btn {
+                flex: 1;
+                max-width: 170px;
             }
         }
         .auth-panel {
@@ -320,9 +331,11 @@
     </style>
 </head>
 <body>
+    <div class="top-band">
+        <div id="authBar" class="auth-bar"></div>
+    </div>
     <div class="page-title">Food Photography Gallery</div>
     <div id="statusBar" class="status-bar"></div>
-    <div id="authBar" class="auth-bar"></div>
     <div id="authPanel" class="auth-panel" hidden>
         <div class="auth-card">
             <button class="auth-close" onclick="closeAuthPanel()" aria-label="Close authentication">×</button>
