@@ -16,4 +16,6 @@ Reviews require both a 1–5 star rating and a non-empty comment. Each food item
 saved community note is regenerated only when a new review is posted; normal
 gallery reads use the saved note without another AI request. Reviews return
 immediately after they are saved while the community note updates in the
-background.
+background. Clerk sign-up/sign-in is required before users can submit reviews;
+the server verifies the Clerk session before saving them. Review comments store
+the submitted star rating and display it beside the reviewer's name.
