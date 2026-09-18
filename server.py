@@ -144,13 +144,12 @@ def get_clerk_jwks():
     now = time.time()
     if JWKS_CACHE["expires_at"] > now:
         return JWKS_CACHE["keys"]
-    if not CLERK_SECRET_KEY:
+    if not CLERK_PUBLISHABLE_KEY:
         return []
 
-    request = Request(
-        "https://api.clerk.com/v1/jwks",
-        headers={"Authorization": f"Bearer {CLERK_SECRET_KEY}"},
-    )
+    encoded_domain = CLERK_PUBLISHABLE_KEY.split("_", 2)[2]
+    frontend_api_domain = decode_base64url(encoded_domain).decode("utf-8")[:-1]
+    request = Request(f"https://{frontend_api_domain}/.well-known/jwks.json")
     with JWKS_LOCK:
         if JWKS_CACHE["expires_at"] > time.time():
             return JWKS_CACHE["keys"]
