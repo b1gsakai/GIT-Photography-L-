@@ -14,12 +14,14 @@
             font-family: Arial, sans-serif;
             background-color: #f5f5f5;
             padding: 20px;
+            position: relative;
         }
         .page-title {
             text-align: center;
             font-size: 2.5rem;
             font-weight: bold;
             margin-bottom: 30px;
+            padding: 0 180px;
             color: #333;
         }
         .meal-section {
@@ -195,16 +197,14 @@
             padding: 10px;
         }
         .auth-bar {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 2;
             display: flex;
             align-items: center;
-            justify-content: space-between;
             gap: 12px;
-            max-width: 1200px;
-            margin: 0 auto 20px;
-            padding: 10px 14px;
-            background: white;
-            border-radius: 6px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+            padding: 0;
             color: #555;
         }
         .auth-actions {
@@ -226,6 +226,19 @@
         }
         .auth-btn:hover {
             filter: brightness(0.95);
+        }
+        @media (max-width: 600px) {
+            .page-title {
+                padding: 45px 0 0;
+                font-size: 2rem;
+            }
+            .auth-bar {
+                top: 12px;
+                right: 12px;
+            }
+            .auth-user {
+                display: none;
+            }
         }
         .auth-panel {
             position: fixed;
@@ -514,12 +527,12 @@
             const authBar = document.getElementById('authBar');
             if (!authBar) return;
             if (!authState.loaded) {
-                authBar.innerHTML = '<span>Loading account access...</span>';
+                authBar.innerHTML = '';
                 return;
             }
             if (authState.user) {
                 authBar.innerHTML = `
-                    <span>Signed in as <strong>${escapeHtml(getDisplayName())}</strong></span>
+                    <span class="auth-user">Signed in as <strong>${escapeHtml(getDisplayName())}</strong></span>
                     <div class="auth-actions">
                         <button class="auth-btn secondary" onclick="signOutUser()">Log out</button>
                     </div>
@@ -527,7 +540,6 @@
                 return;
             }
             authBar.innerHTML = `
-                <span>Sign up or log in to post a rating and comment.</span>
                 <div class="auth-actions">
                     <button class="auth-btn secondary" onclick="openAuthPanel('sign-in')">Log in</button>
                     <button class="auth-btn" onclick="openAuthPanel('sign-up')">Sign up</button>
@@ -645,9 +657,7 @@
                 } else {
                     html += `
                         <div class="review-requirement">
-                            Sign up or log in to rate and comment on this food.
-                            <button class="auth-btn" onclick="openAuthPanel('sign-up')">Create account</button>
-                            <button class="auth-btn secondary" onclick="openAuthPanel('sign-in')">Log in</button>
+                            Use the Sign up or Log in buttons in the top-right corner to rate and comment.
                         </div>
                     `;
                 }
