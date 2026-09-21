@@ -74,8 +74,28 @@ def fallback_summary(food_name):
     comments = item["comments"]
     if not ratings and not comments:
         return f"No reviews yet for {food_name}. Be the first to rate and comment!"
+
     average = sum(ratings) / len(ratings) if ratings else 0
-    return f"Community rating: {average:.1f}/5 from {len(ratings)} ratings and {len(comments)} comments."
+    excerpts = []
+    for comment in comments[-3:]:
+        text = " ".join(str(comment.get("text", "")).split()).strip()
+        if not text:
+            continue
+        if len(text) > 180:
+            text = f"{text[:177].rstrip()}..."
+        excerpts.append(f'"{text}"')
+
+    rating_summary = (
+        f"The community rates it {average:.1f}/5 from "
+        f"{len(ratings)} {'rating' if len(ratings) == 1 else 'ratings'}."
+    )
+    if not excerpts:
+        return rating_summary
+    if len(excerpts) == 1:
+        feedback_summary = f"One reviewer said {excerpts[0]}."
+    else:
+        feedback_summary = f"Recent reviewers said {', '.join(excerpts[:-1])}, and {excerpts[-1]}."
+    return f"{feedback_summary} {rating_summary}"
 
 
 def generate_summary_with_cerebras(food_name):
